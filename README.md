@@ -1,6 +1,6 @@
-# Badger RL README
+# WisTex System
 
-This is the BadgerRL internal fork of BHumanCodeRelease.
+This is the WisTex internal fork of BHumanCodeRelease.
 
 ## Setup instructions
 

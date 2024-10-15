@@ -1,0 +1,134 @@
+#!/bin/bash
+
+BINARY="/home/nao/Config/bhuman"
+LOGDIR="/home/nao/logging"
+DUMPFILE="/home/nao/bhdump.log"
+BACKGROUND=false
+DEBUG=false
+
+usage()
+{
+  echo "usage: $0 [ -b | -d ] - Starts the last deployed bhuman version."
+  echo "    -b  redirect output to logfile only"
+  echo "    -d  start bhuman in a debugger"
+  exit 1
+}
+
+if [ $(whoami) != nao ]; then
+  echo "bhuman can only be started by user 'nao'."
+  exit 1
+fi
+
+if [ $# -eq 1 ]; then
+  case $1 in
+    -b)
+      BACKGROUND=true
+      ;;
+    -d)
+      DEBUG=true
+      ;;
+    *)
+      usage
+      ;;
+  esac
+elif [ $# -ne 0 ]; then
+  usage
+fi
+
+if [ -f /home/nao/touchfiles ]; then
+  touch /home/nao/Config/Robots/*/*/cameraCalibration.cfg \
+    /home/nao/Config/Robots/*/Body/footSoleRotationCalibration.cfg \
+    /home/nao/Config/Robots/*/Body/imuCalibration.cfg 2>/dev/null
+  sleep 0.1
+  touch /home/nao/Config/settings.cfg
+  rm /home/nao/touchfiles
+fi
+
+# Remove assertion dumps from previous runs.
+rm -f "${DUMPFILE}"
+
+# This should fix a freaky cygwin bug.
+if [ ! -x "${BINARY}" ]; then
+  chmod u+x "${BINARY}" || exit 1
+fi
+
+# Ignore SIGINT and SIGTERM. This inherits to child processes,
+# but bhuman installs its own handlers, so this script will come to an end, too.
+trap "" 2 15
+
+# Mount USB drive. In some contexts in which a USB drive is required (e.g. remote events), we refuse to continue without a USB drive.
+if [ -e /home/nao/.config/requireUSB ]; then
+  while ! ( mount /media/usb 2>/dev/null && /home/nao/bin/chmod-usb && mkdir -p /media/usb/logs ); do
+    trap - 2 15
+    aplay -q /home/nao/Config/Sounds/insertUSBDrive.wav
+    sleep 10
+    trap "" 2 15
+  done
+else
+  mount /media/usb 2>/dev/null && /home/nao/bin/chmod-usb && mkdir -p /media/usb/logs
+fi
+
+if [ -f /media/usb/config.json ]; then
+  settingsReplacements()
+  {
+    local SEDFLAGS=""
+    [ ! -z ${FIELDPLAYERCOLOR} ] && SEDFLAGS="$SEDFLAGS -e 's/fieldPlayerColor =.*/fieldPlayerColor = $FIELDPLAYERCOLOR;/'"
+    [ ! -z ${GOALKEEPERCOLOR} ] && SEDFLAGS="$SEDFLAGS -e 's/goalkeeperColor =.*/goalkeeperColor = $GOALKEEPERCOLOR;/'"
+    [ ! -z ${PLAYER} ] && SEDFLAGS="$SEDFLAGS -e 's/playerNumber =.*/playerNumber = $PLAYER;/'"
+    [ ! -z ${TEAM} ] && SEDFLAGS="$SEDFLAGS -e 's/teamNumber =.*/teamNumber = $TEAM;/'"
+    [ ! -z ${MAGICNUMBER} ] && SEDFLAGS="$SEDFLAGS -e 's/magicNumber =.*/magicNumber = $MAGICNUMBER;/'"
+    echo "${SEDFLAGS}"
+  }
+
+  PLAYER=$(python3 -c "import json; config = json.load(open('/media/usb/config.json', 'r')); print(config['settings']['playerNumber'])" 2>/dev/null)
+  if [ -z ${PLAYER} ]; then
+    PLAYER=$(lsblk -ndo label $(mount | grep -o ".* on /media/usb " | tr " " "\n" | head -1) | grep -Eo "[0-9]+$")
+  fi
+  FIELDPLAYERCOLOR=$(python3 -c "import json; config = json.load(open('/media/usb/config.json', 'r')); print(config['settings']['fieldPlayerColor'])" 2>/dev/null)
+  GOALKEEPERCOLOR=$(python3 -c "import json; config = json.load(open('/media/usb/config.json', 'r')); print(config['settings']['goalkeeperColor'])" 2>/dev/null)
+  TEAM=$(python3 -c "import json; config = json.load(open('/media/usb/config.json', 'r')); print(config['settings']['teamNumber'])" 2>/dev/null)
+  MAGICNUMBER=$(python3 -c "import json; config = json.load(open('/media/usb/config.json', 'r')); print(config['settings']['magicNumber'])" 2>/dev/null)
+  SEDFLAGS="$(settingsReplacements)"
+  if [ ! -z "${SEDFLAGS}" ]; then
+    touch -r /home/nao/Config/settings.cfg /home/nao/Config/teams.cfg
+    bash -c "sed ${SEDFLAGS} -i /home/nao/Config/settings.cfg"
+    touch -r /home/nao/Config/teams.cfg /home/nao/Config/settings.cfg
+  fi
+
+  IP=$(eval echo $(python3 -c "import json; config = json.load(open('/media/usb/config.json', 'r')); print(config['wifi']['ipAddress'])" 2>/dev/null))
+  SSID=$(python3 -c "import json; config = json.load(open('/media/usb/config.json', 'r')); print(config['wifi']['ssid'])" 2>/dev/null)
+  PASSWORD=$(python3 -c "import json; config = json.load(open('/media/usb/config.json', 'r')); print(config['wifi']['password'])" 2>/dev/null)
+  if [ ! -z "${SSID}" -a ! -z "${IP}" ]; then
+    echo "\"${SSID}\":" >/home/nao/Profiles/fromUSB
+    echo "  password: \"${PASSWORD}\"" >>/home/nao/Profiles/fromUSB
+    /home/nao/bin/setprofile fromUSB ${IP}
+  fi
+fi
+
+if [ -d /media/usb/logs ]; then
+  ln -sfT /media/usb/logs "${LOGDIR}"
+else
+  ln -sfT /home/nao/logs "${LOGDIR}"
+fi
+
+# Make log-names unique by numbering them.
+COUNTER=$(ls "${LOGDIR}" | sed -nE "s/^bhumand_\(([0-9]+)\).log$/\1/p" | sort -n | tail -n1)
+COUNTER=$(expr ${COUNTER} + 1)
+LOGFILE="${LOGDIR}/bhumand_(${COUNTER}).log"
+
+# Actually execute bhuman.
+if ${DEBUG}; then
+  gdb "${BINARY}"
+elif ${BACKGROUND}; then
+  "${BINARY}" -w 2>&1 | mawk -W interactive -F '\n' '{print strftime("%H:%M:%S", systime()) " " $0}' >"${LOGFILE}"
+else
+  "${BINARY}" -w 2>&1 | mawk -W interactive -F '\n' '{print strftime("%H:%M:%S", systime()) " " $0}' | tee "${LOGFILE}"
+fi
+RESULT=${PIPESTATUS[0]}
+
+# Remove leftovers.
+rm -f "${LOGDIR}"
+umount /media/usb 2>/dev/null
+
+# Exit with result of ${BINARY}.
+exit ${RESULT}

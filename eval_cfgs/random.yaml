@@ -1,0 +1,11 @@
+robot1_X: [-4.5, 0]
+robot1_Y: [-3, 3]
+
+robot2_X: [-4.5, 0]
+robot2_Y: [-3, 3]
+
+robot3_X: [0, 4.5]
+robot3_Y: [-3, 3]
+
+ballX: [-4.5, 4.5]
+ballY: [-3, 3]
