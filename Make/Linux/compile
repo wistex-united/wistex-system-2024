@@ -1,0 +1,19 @@
+#!/bin/bash
+# Frontend to `cmake --build ...`
+
+cd "$(dirname "$(which "$0")")"
+
+CONFIG="Develop"
+TARGETS=""
+
+case $1 in
+  Debug|Develop|Release)
+    CONFIG=$1
+    shift
+esac
+
+if [ $# -gt 0 ]; then
+  TARGETS="--target $@"
+fi
+
+cmake --build ../../Build/Linux/CMake/$CONFIG --config $CONFIG $TARGETS

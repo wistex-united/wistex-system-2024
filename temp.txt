@@ -1,0 +1,58 @@
+std::vector<float> Observation::get_observation(
+    int player_number,
+    std::vector<float> agent,
+    std::vector<float> ball,
+    std::vector<float> target
+)
+{
+    std::vector<float> observation;
+    history_length = 3;
+
+    // Init history for robot if it hasn't been initialized
+    if (history.find(player_number) == history.end()) {
+        history[player_number] = std::vector<std::vector<float>>();
+    }
+    while ((int) history[player_number].size() < history_length) {
+        history[player_number].push_back({0, 0, 0, 0});
+    }
+
+    observation.push_back(can_kick(agent, ball) ? 1 : 0);
+
+    std::vector<float> goal = get_relative_observation(target, {4500, 0});
+    observation.insert(observation.end(), goal.begin(), goal.end());
+
+    std::vector<float> agent_to_target = get_relative_observation(target, agent);
+    observation.insert(observation.end(), agent_to_target.begin(), agent_to_target.end());
+
+    std::vector<float> opp_post_1 = get_relative_observation(target, {4500, 500});
+    observation.insert(observation.end(), opp_post_1.begin(), opp_post_1.end());
+
+    std::vector<float> opp_post_2 = get_relative_observation(target, {4500, -500});
+    observation.insert(observation.end(), opp_post_2.begin(), opp_post_2.end());
+
+    std::vector<float> team_post_1 = get_relative_observation(target, {-4500, 500});
+    observation.insert(observation.end(), team_post_1.begin(), team_post_1.end());
+
+    std::vector<float> team_post_2 = get_relative_observation(target, {-4500, -500});
+    observation.insert(observation.end(), team_post_2.begin(), team_post_2.end());
+
+    std::vector<float> side_1 = get_relative_observation(target, {0, 3000});
+    observation.insert(observation.end(), side_1.begin(), side_1.end());
+
+    std::vector<float> side_2 = get_relative_observation(target, {0, -3000});
+    observation.insert(observation.end(), side_2.begin(), side_2.end());
+
+    // Add history
+    int hsize = history[player_number].size();
+    for (int i = hsize - history_length; i < hsize; i++) {
+        observation.insert(observation.end(), history[player_number][i].begin(), history[player_number][i].end());
+    }
+
+     // step observation history
+    step_history(agent, ball, player_number);
+
+    return observation;
+
+
+
+}
